@@ -2,7 +2,7 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import Database from "better-sqlite3";
-import bcrypt from "bcryptjs";
+import * as bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import cookieParser from "cookie-parser";
 import nodemailer from "nodemailer";
@@ -242,7 +242,14 @@ async function startServer() {
       }
 
       const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
-      const hashedPassword = await bcrypt.hash(password, 10);
+      
+      console.log("Hashing password...");
+      const hash = (bcrypt as any).default?.hash || bcrypt.hash;
+      if (typeof hash !== 'function') {
+        throw new Error("Biblioteca de segurança não carregada corretamente");
+      }
+      const hashedPassword = await hash(password, 10);
+      console.log("Password hashed successfully.");
       
       const stmt = db.prepare("INSERT INTO users (name, email, cpf, password, verificationCode, isVerified) VALUES (?, ?, ?, ?, ?, 0)");
       stmt.run(name, email, cpf, hashedPassword, verificationCode);
@@ -290,7 +297,8 @@ async function startServer() {
     const { identifier, password } = req.body; // identifier can be email or cpf
     try {
       const user: any = db.prepare("SELECT * FROM users WHERE email = ? OR cpf = ?").get(identifier, identifier);
-      if (!user || !(await bcrypt.compare(password, user.password))) {
+      const compare = (bcrypt as any).default?.compare || bcrypt.compare;
+      if (!user || !(await compare(password, user.password))) {
         return res.status(401).json({ error: "Credenciais inválidas" });
       }
       
@@ -382,6 +390,15 @@ async function startServer() {
   // 404 for API routes - prevent falling through to Vite/HTML
   app.use("/api/*", (req, res) => {
     res.status(404).json({ error: "API route not found" });
+  });
+
+  // Global Error Handler
+  app.use((err: any, req: any, res: any, next: any) => {
+    console.error("GLOBAL ERROR:", err);
+    res.status(500).json({ 
+      error: "Erro interno no servidor", 
+      details: process.env.NODE_ENV !== 'production' ? err.message : undefined 
+    });
   });
 
   // Vite middleware for development
