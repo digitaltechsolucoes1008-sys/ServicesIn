@@ -3,6 +3,7 @@ export interface User {
   name: string;
   email: string;
   cpf: string;
+  isVerified: boolean;
 }
 
 export interface Service {

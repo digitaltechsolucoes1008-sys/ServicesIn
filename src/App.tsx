@@ -39,6 +39,10 @@ const registerSchema = z.object({
   password: z.string().min(6, "Senha deve ter no mínimo 6 caracteres"),
 });
 
+const verificationSchema = z.object({
+  code: z.string().length(6, "O código deve ter 6 dígitos"),
+});
+
 const serviceSchema = z.object({
   title: z.string().min(5, "Título muito curto"),
   description: z.string().min(20, "Descrição deve ser mais detalhada"),
@@ -52,6 +56,7 @@ const serviceSchema = z.object({
 
 type LoginData = z.infer<typeof loginSchema>;
 type RegisterData = z.infer<typeof registerSchema>;
+type VerificationData = z.infer<typeof verificationSchema>;
 type ServiceData = z.infer<typeof serviceSchema>;
 
 // --- Components ---
@@ -444,8 +449,18 @@ function AuthForm({ type, onSuccess, onSwitch }: {
   onSwitch: () => void 
 }) {
   const [error, setError] = useState('');
+  const [verifyingEmail, setVerifyingEmail] = useState<string | null>(null);
+
   const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<any>({
     resolver: zodResolver(type === 'login' ? loginSchema : registerSchema)
+  });
+
+  const { 
+    register: registerVerify, 
+    handleSubmit: handleSubmitVerify, 
+    formState: { errors: errorsVerify, isSubmitting: isSubmittingVerify } 
+  } = useForm<any>({
+    resolver: zodResolver(verificationSchema)
   });
 
   const onSubmit = async (data: any) => {
@@ -459,14 +474,93 @@ function AuthForm({ type, onSuccess, onSwitch }: {
       });
       const result = await res.json();
       if (res.ok) {
-        onSuccess(result.user);
+        if (type === 'register') {
+          setVerifyingEmail(data.email);
+        } else {
+          onSuccess(result.user);
+        }
       } else {
-        setError(result.error);
+        if (res.status === 403 && result.requiresVerification) {
+          setVerifyingEmail(result.email);
+        } else {
+          setError(result.error);
+        }
       }
     } catch (err) {
       setError('Ocorreu um erro. Tente novamente.');
     }
   };
+
+  const onVerify = async (data: any) => {
+    setError('');
+    try {
+      const res = await fetch('/api/auth/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: verifyingEmail, code: data.code })
+      });
+      const result = await res.json();
+      if (res.ok) {
+        onSuccess(result.user);
+      } else {
+        setError(result.error);
+      }
+    } catch (err) {
+      setError('Erro ao verificar código.');
+    }
+  };
+
+  if (verifyingEmail) {
+    return (
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="max-w-md mx-auto bg-white rounded-3xl border border-zinc-200 p-8 shadow-xl mt-12"
+      >
+        <div className="text-center space-y-2 mb-8">
+          <h2 className="text-2xl font-bold">Verifique seu e-mail</h2>
+          <p className="text-sm text-zinc-500">
+            Enviamos um código de 6 dígitos para <span className="font-semibold text-zinc-900">{verifyingEmail}</span>
+          </p>
+        </div>
+
+        <form onSubmit={handleSubmitVerify(onVerify)} className="space-y-4">
+          {error && (
+            <div className="p-3 bg-red-50 border border-red-100 text-red-600 text-xs rounded-xl text-center">
+              {error}
+            </div>
+          )}
+
+          <div className="space-y-1">
+            <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 ml-1">Código de Verificação</label>
+            <input 
+              {...registerVerify('code')}
+              className="w-full px-4 py-4 bg-zinc-50 border border-zinc-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all text-center text-2xl font-bold tracking-[10px]"
+              placeholder="000000"
+              maxLength={6}
+            />
+            {errorsVerify.code && <p className="text-[10px] text-red-500 ml-1">{errorsVerify.code.message as string}</p>}
+          </div>
+
+          <button 
+            type="submit" 
+            disabled={isSubmittingVerify}
+            className="w-full py-4 bg-zinc-900 text-white rounded-2xl font-bold hover:bg-blue-600 transition-all disabled:opacity-50"
+          >
+            {isSubmittingVerify ? 'Verificando...' : 'Validar Cadastro'}
+          </button>
+          
+          <button 
+            type="button"
+            onClick={() => setVerifyingEmail(null)}
+            className="w-full py-2 text-sm text-zinc-500 hover:text-zinc-900 transition-colors"
+          >
+            Voltar
+          </button>
+        </form>
+      </motion.div>
+    );
+  }
 
   return (
     <motion.div 

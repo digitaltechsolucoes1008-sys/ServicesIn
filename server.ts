@@ -5,6 +5,7 @@ import Database from "better-sqlite3";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import cookieParser from "cookie-parser";
+import nodemailer from "nodemailer";
 
 import { fileURLToPath } from 'url';
 
@@ -14,6 +15,43 @@ const __dirname = path.dirname(__filename);
 const db = new Database("serviconnect.db");
 const JWT_SECRET = process.env.JWT_SECRET || "serviconnect-super-secret-key";
 
+// Email Transporter
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST,
+  port: parseInt(process.env.SMTP_PORT || "587"),
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+  },
+});
+
+async function sendVerificationEmail(email: string, code: string) {
+  if (!process.env.SMTP_HOST) {
+    console.log("---------------------------------------");
+    console.log(`VERIFICATION CODE FOR ${email}: ${code}`);
+    console.log("Configure SMTP in .env to send real emails.");
+    console.log("---------------------------------------");
+    return;
+  }
+
+  await transporter.sendMail({
+    from: process.env.SMTP_FROM || '"Service In" <noreply@servicein.com>',
+    to: email,
+    subject: "Verifique seu cadastro - Service In",
+    text: `Seu código de verificação é: ${code}`,
+    html: `
+      <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e5e7eb; border-radius: 12px;">
+        <h2 style="color: #2563eb;">Bem-vindo ao Service In!</h2>
+        <p>Use o código abaixo para validar seu cadastro:</p>
+        <div style="background: #f3f4f6; padding: 20px; text-align: center; font-size: 32px; font-weight: bold; letter-spacing: 5px; color: #111827; border-radius: 8px; margin: 20px 0;">
+          ${code}
+        </div>
+        <p style="color: #6b7280; font-size: 14px;">Se você não solicitou este código, ignore este e-mail.</p>
+      </div>
+    `,
+  });
+}
+
 // Initialize Database
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
@@ -21,7 +59,9 @@ db.exec(`
     name TEXT NOT NULL,
     email TEXT UNIQUE NOT NULL,
     cpf TEXT UNIQUE NOT NULL,
-    password TEXT NOT NULL
+    password TEXT NOT NULL,
+    isVerified INTEGER DEFAULT 0,
+    verificationCode TEXT
   );
 
   CREATE TABLE IF NOT EXISTS services (
@@ -60,6 +100,16 @@ if (!columns.includes("workingDays")) {
 }
 if (!columns.includes("experienceYears")) {
   db.exec("ALTER TABLE services ADD COLUMN experienceYears INTEGER NOT NULL DEFAULT 0");
+}
+
+// Migration for users table
+const userTableInfo = db.prepare("PRAGMA table_info(users)").all() as any[];
+const userColumns = userTableInfo.map(c => c.name);
+if (!userColumns.includes("isVerified")) {
+  db.exec("ALTER TABLE users ADD COLUMN isVerified INTEGER DEFAULT 0");
+}
+if (!userColumns.includes("verificationCode")) {
+  db.exec("ALTER TABLE users ADD COLUMN verificationCode TEXT");
 }
 
 async function seedDatabase() {
@@ -175,14 +225,53 @@ async function startServer() {
   app.post("/api/auth/register", async (req, res) => {
     const { name, email, cpf, password } = req.body;
     try {
+      // Check if email already exists
+      const existingEmail = db.prepare("SELECT id FROM users WHERE email = ?").get(email);
+      if (existingEmail) {
+        return res.status(400).json({ error: "Este e-mail já está em uso por outra conta." });
+      }
+
+      // Check if CPF already exists
+      const existingCpf = db.prepare("SELECT id FROM users WHERE cpf = ?").get(cpf);
+      if (existingCpf) {
+        return res.status(400).json({ error: "Este CPF já está cadastrado em outra conta." });
+      }
+
+      const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
       const hashedPassword = await bcrypt.hash(password, 10);
-      const stmt = db.prepare("INSERT INTO users (name, email, cpf, password) VALUES (?, ?, ?, ?)");
-      const result = stmt.run(name, email, cpf, hashedPassword);
-      const token = jwt.sign({ id: result.lastInsertRowid, email, name }, JWT_SECRET);
-      res.cookie("token", token, { httpOnly: true, secure: true, sameSite: "none" });
-      res.json({ user: { id: result.lastInsertRowid, name, email, cpf } });
+      
+      const stmt = db.prepare("INSERT INTO users (name, email, cpf, password, verificationCode, isVerified) VALUES (?, ?, ?, ?, ?, 0)");
+      const result = stmt.run(name, email, cpf, hashedPassword, verificationCode);
+      
+      await sendVerificationEmail(email, verificationCode);
+      
+      res.json({ 
+        message: "Código de verificação enviado para o seu e-mail.",
+        email 
+      });
     } catch (err: any) {
-      res.status(400).json({ error: err.message.includes("UNIQUE") ? "Email ou CPF já cadastrado" : "Erro ao registrar usuário" });
+      console.error("Registration error:", err);
+      res.status(500).json({ error: "Erro interno ao processar o cadastro." });
+    }
+  });
+
+  app.post("/api/auth/verify", async (req, res) => {
+    const { email, code } = req.body;
+    try {
+      const user: any = db.prepare("SELECT * FROM users WHERE email = ?").get(email);
+      if (!user) return res.status(404).json({ error: "Usuário não encontrado" });
+      
+      if (user.verificationCode !== code) {
+        return res.status(400).json({ error: "Código de verificação inválido" });
+      }
+
+      db.prepare("UPDATE users SET isVerified = 1, verificationCode = NULL WHERE id = ?").run(user.id);
+      
+      const token = jwt.sign({ id: user.id, email: user.email, name: user.name }, JWT_SECRET);
+      res.cookie("token", token, { httpOnly: true, secure: true, sameSite: "none" });
+      res.json({ user: { id: user.id, name: user.name, email: user.email, cpf: user.cpf } });
+    } catch (err) {
+      res.status(500).json({ error: "Erro ao verificar código" });
     }
   });
 
@@ -193,6 +282,15 @@ async function startServer() {
       if (!user || !(await bcrypt.compare(password, user.password))) {
         return res.status(401).json({ error: "Credenciais inválidas" });
       }
+      
+      if (!user.isVerified) {
+        return res.status(403).json({ 
+          error: "Conta não verificada. Por favor, verifique seu e-mail.",
+          requiresVerification: true,
+          email: user.email 
+        });
+      }
+
       const token = jwt.sign({ id: user.id, email: user.email, name: user.name }, JWT_SECRET);
       res.cookie("token", token, { httpOnly: true, secure: true, sameSite: "none" });
       res.json({ user: { id: user.id, name: user.name, email: user.email, cpf: user.cpf } });
