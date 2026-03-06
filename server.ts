@@ -225,7 +225,9 @@ async function startServer() {
   };
 
   // API Routes
-  app.post("/api/auth/register", async (req, res) => {
+  app.get("/api/health", (req, res) => res.json({ status: "ok", env: process.env.NODE_ENV }));
+
+  app.post(["/api/auth/register", "/api/auth/register/"], async (req, res) => {
     const { name, email, cpf, password } = req.body;
     console.log(`Registering user: ${email}`);
     try {
@@ -268,7 +270,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/auth/verify", async (req, res) => {
+  app.post(["/api/auth/verify", "/api/auth/verify/"], async (req, res) => {
     const { email, code } = req.body;
     try {
       const user: any = db.prepare("SELECT * FROM users WHERE email = ?").get(email);
@@ -289,7 +291,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/auth/login", async (req, res) => {
+  app.post(["/api/auth/login", "/api/auth/login/"], async (req, res) => {
     const { identifier, password } = req.body; // identifier can be email or cpf
     try {
       const user: any = db.prepare("SELECT * FROM users WHERE email = ? OR cpf = ?").get(identifier, identifier);
@@ -314,12 +316,12 @@ async function startServer() {
     }
   });
 
-  app.post("/api/auth/logout", (req, res) => {
+  app.post(["/api/auth/logout", "/api/auth/logout/"], (req, res) => {
     res.clearCookie("token");
     res.json({ success: true });
   });
 
-  app.get("/api/auth/me", authenticate, (req: any, res) => {
+  app.get(["/api/auth/me", "/api/auth/me/"], authenticate, (req: any, res) => {
     const user: any = db.prepare("SELECT id, name, email, cpf, isVerified FROM users WHERE id = ?").get(req.user.id);
     if (user) {
       user.isVerified = !!user.isVerified;
@@ -328,7 +330,7 @@ async function startServer() {
   });
 
   // Services Routes
-  app.get("/api/services", (req, res) => {
+  app.get(["/api/services", "/api/services/"], (req, res) => {
     const services = db.prepare(`
       SELECT s.*, u.name as providerName 
       FROM services s 
@@ -340,7 +342,7 @@ async function startServer() {
     res.json(services);
   });
 
-  app.post("/api/services", authenticate, (req: any, res) => {
+  app.post(["/api/services", "/api/services/"], authenticate, (req: any, res) => {
     const { title, description, category, price, priceType, experienceYears, workingDays, contactInfo } = req.body;
     try {
       const stmt = db.prepare("INSERT INTO services (userId, title, description, category, price, priceType, experienceYears, workingDays, contactInfo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
@@ -352,7 +354,7 @@ async function startServer() {
     }
   });
 
-  app.get("/api/my-services", authenticate, (req: any, res) => {
+  app.get(["/api/my-services", "/api/my-services/"], authenticate, (req: any, res) => {
     const services = db.prepare("SELECT * FROM services WHERE userId = ?").all(req.user.id).map((s: any) => ({
       ...s,
       workingDays: JSON.parse(s.workingDays || '[]')
@@ -360,7 +362,7 @@ async function startServer() {
     res.json(services);
   });
 
-  app.post("/api/bookings", authenticate, (req: any, res) => {
+  app.post(["/api/bookings", "/api/bookings/"], authenticate, (req: any, res) => {
     const { serviceId } = req.body;
     try {
       const stmt = db.prepare("INSERT INTO bookings (serviceId, customerId) VALUES (?, ?)");
@@ -371,7 +373,7 @@ async function startServer() {
     }
   });
 
-  app.get("/api/my-bookings", authenticate, (req: any, res) => {
+  app.get(["/api/my-bookings", "/api/my-bookings/"], authenticate, (req: any, res) => {
     const bookings = db.prepare(`
       SELECT b.*, s.title as serviceTitle, u.name as providerName, u.email as providerEmail
       FROM bookings b
