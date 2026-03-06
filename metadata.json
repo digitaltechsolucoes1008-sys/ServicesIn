@@ -1,0 +1,5 @@
+{
+  "name": "Service In",
+  "description": "Plataforma profissional para conexão entre prestadores de serviços e clientes com autenticação por Email e CPF.",
+  "requestFramePermissions": []
+}
