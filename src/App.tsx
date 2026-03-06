@@ -472,7 +472,14 @@ function AuthForm({ type, onSuccess, onSwitch }: {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data)
       });
-      const result = await res.json();
+      
+      let result;
+      try {
+        result = await res.json();
+      } catch (e) {
+        throw new Error('Resposta do servidor inválida');
+      }
+
       if (res.ok) {
         if (type === 'register') {
           setVerifyingEmail(data.email);
@@ -483,11 +490,11 @@ function AuthForm({ type, onSuccess, onSwitch }: {
         if (res.status === 403 && result.requiresVerification) {
           setVerifyingEmail(result.email);
         } else {
-          setError(result.error);
+          setError(result.error || 'Erro desconhecido no servidor');
         }
       }
-    } catch (err) {
-      setError('Ocorreu um erro. Tente novamente.');
+    } catch (err: any) {
+      setError(err.message || 'Ocorreu um erro de rede. Tente novamente.');
     }
   };
 

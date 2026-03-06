@@ -227,6 +227,7 @@ async function startServer() {
   // API Routes
   app.post("/api/auth/register", async (req, res) => {
     const { name, email, cpf, password } = req.body;
+    console.log(`Registering user: ${email}`);
     try {
       // Check if email already exists
       const existingEmail = db.prepare("SELECT id FROM users WHERE email = ?").get(email);
@@ -244,17 +245,23 @@ async function startServer() {
       const hashedPassword = await bcrypt.hash(password, 10);
       
       const stmt = db.prepare("INSERT INTO users (name, email, cpf, password, verificationCode, isVerified) VALUES (?, ?, ?, ?, ?, 0)");
-      const result = stmt.run(name, email, cpf, hashedPassword, verificationCode);
+      stmt.run(name, email, cpf, hashedPassword, verificationCode);
       
-      await sendVerificationEmail(email, verificationCode);
+      console.log(`User created. Sending verification email to ${email}...`);
+      try {
+        await sendVerificationEmail(email, verificationCode);
+      } catch (emailErr) {
+        console.error("Failed to send verification email, but user was created:", emailErr);
+        // We continue even if email fails in dev, so the user can see the code in logs
+      }
       
       res.json({ 
         message: "Código de verificação enviado para o seu e-mail.",
         email 
       });
     } catch (err: any) {
-      console.error("Registration error:", err);
-      res.status(500).json({ error: "Erro interno ao processar o cadastro." });
+      console.error("Registration error details:", err);
+      res.status(500).json({ error: `Erro no servidor: ${err.message}` });
     }
   });
 
@@ -272,8 +279,9 @@ async function startServer() {
       
       const token = jwt.sign({ id: user.id, email: user.email, name: user.name }, JWT_SECRET);
       res.cookie("token", token, { httpOnly: true, secure: true, sameSite: "none" });
-      res.json({ user: { id: user.id, name: user.name, email: user.email, cpf: user.cpf } });
-    } catch (err) {
+      res.json({ user: { id: user.id, name: user.name, email: user.email, cpf: user.cpf, isVerified: true } });
+    } catch (err: any) {
+      console.error("Verification error:", err);
       res.status(500).json({ error: "Erro ao verificar código" });
     }
   });
@@ -296,8 +304,9 @@ async function startServer() {
 
       const token = jwt.sign({ id: user.id, email: user.email, name: user.name }, JWT_SECRET);
       res.cookie("token", token, { httpOnly: true, secure: true, sameSite: "none" });
-      res.json({ user: { id: user.id, name: user.name, email: user.email, cpf: user.cpf } });
-    } catch (err) {
+      res.json({ user: { id: user.id, name: user.name, email: user.email, cpf: user.cpf, isVerified: !!user.isVerified } });
+    } catch (err: any) {
+      console.error("Login error:", err);
       res.status(500).json({ error: "Erro interno no servidor" });
     }
   });
@@ -308,7 +317,10 @@ async function startServer() {
   });
 
   app.get("/api/auth/me", authenticate, (req: any, res) => {
-    const user: any = db.prepare("SELECT id, name, email, cpf FROM users WHERE id = ?").get(req.user.id);
+    const user: any = db.prepare("SELECT id, name, email, cpf, isVerified FROM users WHERE id = ?").get(req.user.id);
+    if (user) {
+      user.isVerified = !!user.isVerified;
+    }
     res.json({ user });
   });
 
