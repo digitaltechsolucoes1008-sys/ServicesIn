@@ -2,7 +2,7 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import Database from "better-sqlite3";
-import * as bcrypt from "bcryptjs";
+import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import cookieParser from "cookie-parser";
 import nodemailer from "nodemailer";
@@ -244,11 +244,7 @@ async function startServer() {
       const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
       
       console.log("Hashing password...");
-      const hash = (bcrypt as any).default?.hash || bcrypt.hash;
-      if (typeof hash !== 'function') {
-        throw new Error("Biblioteca de segurança não carregada corretamente");
-      }
-      const hashedPassword = await hash(password, 10);
+      const hashedPassword = bcrypt.hashSync(password, 10);
       console.log("Password hashed successfully.");
       
       const stmt = db.prepare("INSERT INTO users (name, email, cpf, password, verificationCode, isVerified) VALUES (?, ?, ?, ?, ?, 0)");
@@ -297,8 +293,7 @@ async function startServer() {
     const { identifier, password } = req.body; // identifier can be email or cpf
     try {
       const user: any = db.prepare("SELECT * FROM users WHERE email = ? OR cpf = ?").get(identifier, identifier);
-      const compare = (bcrypt as any).default?.compare || bcrypt.compare;
-      if (!user || !(await compare(password, user.password))) {
+      if (!user || !bcrypt.compareSync(password, user.password)) {
         return res.status(401).json({ error: "Credenciais inválidas" });
       }
       

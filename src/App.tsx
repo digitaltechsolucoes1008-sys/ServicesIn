@@ -474,10 +474,12 @@ function AuthForm({ type, onSuccess, onSwitch }: {
       });
       
       let result;
+      const text = await res.text();
       try {
-        result = await res.json();
+        result = JSON.parse(text);
       } catch (e) {
-        throw new Error('Resposta do servidor inválida');
+        setError(`Erro do servidor (${res.status}): ${text.substring(0, 100)}`);
+        return;
       }
 
       if (res.ok) {
