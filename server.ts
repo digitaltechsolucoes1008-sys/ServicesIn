@@ -112,6 +112,9 @@ if (!userColumns.includes("verificationCode")) {
   db.exec("ALTER TABLE users ADD COLUMN verificationCode TEXT");
 }
 
+// Ensure all existing users are verified to prevent lockout after feature update
+db.exec("UPDATE users SET isVerified = 1 WHERE isVerified IS NULL OR isVerified = 0");
+
 async function seedDatabase() {
   const userCount = db.prepare("SELECT COUNT(*) as count FROM users").get() as { count: number };
   if (userCount.count > 0) return;
@@ -127,7 +130,7 @@ async function seedDatabase() {
     { name: "Pedro Rocha", email: "pedro@example.com", cpf: "55566677788", password },
   ];
 
-  const insertUser = db.prepare("INSERT INTO users (name, email, cpf, password) VALUES (?, ?, ?, ?)");
+  const insertUser = db.prepare("INSERT INTO users (name, email, cpf, password, isVerified) VALUES (?, ?, ?, ?, 1)");
   const insertService = db.prepare("INSERT INTO services (userId, title, description, category, price, priceType, experienceYears, workingDays, contactInfo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
 
   testUsers.forEach((u, index) => {
